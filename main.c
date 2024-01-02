@@ -1,18 +1,30 @@
 #include <raylib.h>
 
+#define RAYGUI_IMPLEMENTATION
+#include <raygui.h>
+#include <jungle/style_jungle.h>
+
+typedef struct {
+    int i;
+} AppGuiState;
+
+AppGuiState DrawGUI(AppGuiState state) {
+    GuiPanel((Rectangle) { .x = 0, .y = 0, .width=200, .height=720 }, "Options");
+    return state;
+}
+
 int main() {
-    InitWindow(800, 800, "SimpleLandmassGeneration");
+    InitWindow(1280, 720, "SimpleLandmassGeneration");
     SetWindowMonitor(0);
     SetTargetFPS(60);
+    GuiLoadStyleJungle();
 
+    AppGuiState state;
     while (!WindowShouldClose()) {
         BeginDrawing();
         {
             ClearBackground(BLACK);
-            DrawText("Hello world", 100, 100, 28, WHITE);
-
-            DrawRectangle(0, 0, 80, 20, WHITE);
-            DrawFPS(0, 0);
+            state = DrawGUI(state);
         }
         EndDrawing();
     }
