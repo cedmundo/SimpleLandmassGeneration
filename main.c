@@ -14,13 +14,13 @@
 #define SCALE_MAX 1000
 #define SCALE_FACTOR 10.0f
 
-#define OFFSET_X_MIN (-100)
+#define OFFSET_X_MIN (-10000)
 #define OFFSET_X_DEF 0
-#define OFFSET_X_MAX 100
+#define OFFSET_X_MAX 10000
 
-#define OFFSET_Y_MIN (-100)
+#define OFFSET_Y_MIN (-10000)
 #define OFFSET_Y_DEF 0
-#define OFFSET_Y_MAX 100
+#define OFFSET_Y_MAX 10000
 
 #define WIDTH_MIN 100
 #define WIDTH_DEF 500
@@ -44,7 +44,11 @@
 #define LACUNARITY_MAX 1000
 #define LACUNARITY_FACTOR 100.0f
 
+#define GENERATE_MAP_SECS 0.2f
+
 typedef struct {
+    bool auto_generate;
+
     int seed;
     bool seed_edit_mode;
     bool clicked_random_seed;
@@ -73,12 +77,12 @@ typedef struct {
     int lacunarity;
     bool lacunarity_edit_mode;
 
-    bool generate;
+    bool manually_generate;
 } GeneratorOptions;
 
 typedef struct {
-    Image heightmap;
-    Texture2D heightmap_texture;
+    Image noise_map;
+    Texture2D noise_tex;
     Vector2 position;
 } ProceduralMap;
 
@@ -135,7 +139,7 @@ void DrawGUI(GeneratorOptions *options) {
         options->lacunarity_edit_mode = !options->lacunarity_edit_mode;
     }
 
-    options->generate = GuiButton((Rectangle) { .x = 5, .y = (layout_y+=25), .width=190, .height = 20}, "Generate");
+    options->manually_generate = GuiButton((Rectangle) { .x = 5, .y = (layout_y+=25), .width=190, .height = 20}, "Generate");
 }
 
 ProceduralMap *NewProceduralMap(Vector2 position) {
@@ -145,12 +149,12 @@ ProceduralMap *NewProceduralMap(Vector2 position) {
 }
 
 void UnloadProceduralMap(ProceduralMap *map) {
-    if (IsTextureReady(map->heightmap_texture)) {
-        UnloadTexture(map->heightmap_texture);
+    if (IsTextureReady(map->noise_tex)) {
+        UnloadTexture(map->noise_tex);
     }
 
-    if (IsImageReady(map->heightmap)) {
-        UnloadImage(map->heightmap);
+    if (IsImageReady(map->noise_map)) {
+        UnloadImage(map->noise_map);
     }
 
     MemFree(map);
@@ -199,27 +203,27 @@ void GenerateProceduralMap(ProceduralMap *map, GeneratorOptions options) {
         }
     }
 
-    if (IsTextureReady(map->heightmap_texture)) {
-        UnloadTexture(map->heightmap_texture);
+    if (IsTextureReady(map->noise_tex)) {
+        UnloadTexture(map->noise_tex);
     }
 
-    if (IsImageReady(map->heightmap)) {
-        UnloadImage(map->heightmap);
+    if (IsImageReady(map->noise_map)) {
+        UnloadImage(map->noise_map);
     }
 
-    map->heightmap = (Image) {
+    map->noise_map = (Image) {
         .data = pixels,
         .width = width,
         .height = height,
         .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8,
         .mipmaps = 1,
     };
-    map->heightmap_texture = LoadTextureFromImage(map->heightmap);
+    map->noise_tex = LoadTextureFromImage(map->noise_map);
 }
 
 void DrawProceduralMap(ProceduralMap *map) {
-    if (IsTextureReady(map->heightmap_texture)) {
-        DrawTexture(map->heightmap_texture, (int)map->position.x, (int)map->position.y, WHITE);
+    if (IsTextureReady(map->noise_tex)) {
+        DrawTexture(map->noise_tex, (int)map->position.x, (int)map->position.y, WHITE);
     }
 }
 
@@ -230,6 +234,7 @@ int main() {
     GuiLoadStyleJungle();
 
     GeneratorOptions options = {
+            .auto_generate = false,
             .seed = 0,
             .seed_edit_mode = false,
             .clicked_random_seed = false,
@@ -252,6 +257,7 @@ int main() {
     };
     ProceduralMap *map = NewProceduralMap((Vector2) { 210, 10 });
 
+    float generate_map_timer = 0.0f;
     while (!WindowShouldClose()) {
         BeginDrawing();
         {
@@ -260,16 +266,32 @@ int main() {
             DrawProceduralMap(map);
 
             // Draw GUI
+            options.auto_generate = false;
             DrawGUI(&options);
+
+            Rectangle drawing_area = { .x = 200, .y = 0, .width = (float)GetScreenWidth()-200, .height = (float)GetScreenHeight() };
+            if (IsMouseButtonDown(MOUSE_MIDDLE_BUTTON) && CheckCollisionPointRec(GetMousePosition(), drawing_area)) {
+                options.offset_x -= (int)GetMouseDelta().x;
+                options.offset_y -= (int)GetMouseDelta().y;
+                options.auto_generate = true;
+            }
+
+            if (GetMouseWheelMove() != 0.0f && CheckCollisionPointRec(GetMousePosition(), drawing_area)) {
+                options.scale -= (int)(GetMouseWheelMove() * 5);
+                options.auto_generate = true;
+            }
 
             // Handle input (from drawing/updating GUI):
             // Generate random value
             if (options.clicked_random_seed) {
                 options.seed = (int)GetRandomValue(SEED_MIN, SEED_MAX);
+                options.auto_generate = true;
             }
 
-            // Generate map
-            if (options.generate) {
+            // Generate map with button
+            generate_map_timer += GetFrameTime();
+            if (options.manually_generate || options.auto_generate && generate_map_timer >= GENERATE_MAP_SECS) {
+                generate_map_timer = 0.0f;
                 GenerateProceduralMap(map, options);
             }
         }
