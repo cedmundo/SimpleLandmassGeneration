@@ -1,4 +1,5 @@
 #include <raylib.h>
+#include <raymath.h>
 
 #define RAYGUI_IMPLEMENTATION
 #include <raygui.h>
@@ -10,21 +11,29 @@
 #define SCALE_MIN 1
 #define SCALE_DEF 10
 #define SCALE_MAX 1000
+#define SCALE_FACTOR 10.0f
+
 #define WIDTH_MIN 100
 #define WIDTH_DEF 100
 #define WIDTH_MAX 10000
+
 #define HEIGHT_MIN 100
 #define HEIGHT_DEF 100
 #define HEIGHT_MAX 10000
+
 #define OCTAVES_MIN 1
 #define OCTAVES_DEF 6
 #define OCTAVES_MAX 10
-#define GAIN_MIN 1
+
+#define GAIN_MIN 10
 #define GAIN_DEF 50
 #define GAIN_MAX 100
+#define GAIN_FACTOR 100.0f
+
 #define LACUNARITY_MIN 1
 #define LACUNARITY_DEF 200
 #define LACUNARITY_MAX 1000
+#define LACUNARITY_FACTOR 100.0f
 
 typedef struct {
     int seed;
@@ -52,47 +61,124 @@ typedef struct {
     bool generate;
 } GeneratorOptions;
 
+typedef struct {
+    Image heightmap;
+    Texture2D heightmap_texture;
+    Vector2 position;
+} ProceduralMap;
+
 void DrawGUI(GeneratorOptions *options) {
     GuiPanel((Rectangle) { .x = 0, .y = 0, .width=200, .height=720 }, "Options");
 
     // Seed
     GuiSetStyle(VALUEBOX, TEXT_ALIGNMENT, TEXT_ALIGN_RIGHT);
+    GuiSetStyle(SPINNER, TEXT_ALIGNMENT, TEXT_ALIGN_RIGHT);
     if (GuiValueBox((Rectangle) { .x = 5, .y = 30, .width=155, .height = 20 }, " Seed", &options->seed, SEED_MIN, SEED_MAX, options->seed_edit_mode)) {
         options->seed_edit_mode = !options->seed_edit_mode;
     }
     options->clicked_random_seed = GuiButton((Rectangle) { .x = 5, .y = 55, .width=190, .height = 20}, "Generate random");
 
     // Scale
-    if (GuiValueBox((Rectangle) { .x = 5, .y = 80, .width=175, .height = 20 }, " S", &options->scale, SCALE_MIN, SCALE_MAX, options->scale_edit_mode)) {
+    if (GuiSpinner((Rectangle) { .x = 5, .y = 80, .width=175, .height = 20 }, " S", &options->scale, SCALE_MIN, SCALE_MAX, options->scale_edit_mode)) {
         options->scale_edit_mode = !options->scale_edit_mode;
     }
 
     // Width
-    if (GuiValueBox((Rectangle) { .x = 5, .y = 105, .width=175, .height = 20 }, " W", &options->width, WIDTH_MIN, WIDTH_MAX, options->width_edit_mode)) {
+    if (GuiSpinner((Rectangle) { .x = 5, .y = 105, .width=175, .height = 20 }, " W", &options->width, WIDTH_MIN, WIDTH_MAX, options->width_edit_mode)) {
         options->width_edit_mode = !options->width_edit_mode;
     }
 
     // Height
-    if (GuiValueBox((Rectangle) { .x = 5, .y = 130, .width=175, .height = 20 }, " H", &options->height, HEIGHT_MIN, HEIGHT_MAX, options->height_edit_mode)) {
+    if (GuiSpinner((Rectangle) { .x = 5, .y = 130, .width=175, .height = 20 }, " H", &options->height, HEIGHT_MIN, HEIGHT_MAX, options->height_edit_mode)) {
         options->height_edit_mode = !options->height_edit_mode;
     }
 
     // Octaves
-    if (GuiValueBox((Rectangle) { .x = 5, .y = 155, .width=175, .height = 20 }, " O", &options->octaves, OCTAVES_MIN, OCTAVES_MAX, options->octaves_edit_mode)) {
+    if (GuiSpinner((Rectangle) { .x = 5, .y = 155, .width=175, .height = 20 }, " O", &options->octaves, OCTAVES_MIN, OCTAVES_MAX, options->octaves_edit_mode)) {
         options->octaves_edit_mode = !options->octaves_edit_mode;
     }
 
     // Gain
-    if (GuiValueBox((Rectangle) { .x = 5, .y = 185, .width=175, .height = 20 }, " G", &options->gain, GAIN_MIN, GAIN_MAX, options->gain_edit_mode)) {
+    if (GuiSpinner((Rectangle) { .x = 5, .y = 185, .width=175, .height = 20 }, " G", &options->gain, GAIN_MIN, GAIN_MAX, options->gain_edit_mode)) {
         options->gain_edit_mode = !options->gain_edit_mode;
     }
 
     // Lacunarity
-    if (GuiValueBox((Rectangle) { .x = 5, .y = 210, .width=175, .height = 20 }, " L", &options->lacunarity, LACUNARITY_MIN, LACUNARITY_MAX, options->lacunarity_edit_mode)) {
+    if (GuiSpinner((Rectangle) { .x = 5, .y = 210, .width=175, .height = 20 }, " L", &options->lacunarity, LACUNARITY_MIN, LACUNARITY_MAX, options->lacunarity_edit_mode)) {
         options->lacunarity_edit_mode = !options->lacunarity_edit_mode;
     }
 
     options->generate = GuiButton((Rectangle) { .x = 5, .y = 235, .width=190, .height = 20}, "Generate");
+}
+
+ProceduralMap *NewProceduralMap(Vector2 position) {
+    ProceduralMap *map = MemAlloc(sizeof(ProceduralMap));
+    map->position = position;
+    return map;
+}
+
+void UnloadProceduralMap(ProceduralMap *map) {
+    if (IsTextureReady(map->heightmap_texture)) {
+        UnloadTexture(map->heightmap_texture);
+    }
+
+    if (IsImageReady(map->heightmap)) {
+        UnloadImage(map->heightmap);
+    }
+
+    MemFree(map);
+}
+
+void GenerateProceduralMap(ProceduralMap *map, GeneratorOptions options) {
+    // This is basically a copy-paste from `rtextures.c` file, whoever it handles custom options
+    size_t total_size = options.width * options.height;
+    Color *pixels = MemAlloc(sizeof(Color) * total_size);
+    int offset_x = 0;
+    int offset_y = 0; // TODO: Add offset to generator options
+    int width = options.width;
+    int height = options.height;
+    float scale = (float)options.scale / SCALE_FACTOR;
+    float lacunarity = (float)options.lacunarity / LACUNARITY_FACTOR;
+    float gain = (float)options.gain / GAIN_FACTOR;
+    int octaves = options.octaves;
+
+    for (int y = 0; y < options.height; y++) {
+        for (int x = 0;x < options.width; x++) {
+            float nx = (float)(x + offset_x)*(scale/(float)width);
+            float ny = (float)(y + offset_y)*(scale/(float)height);
+            // TODO: Make seed work with perlin noise
+            float p = stb_perlin_fbm_noise3(nx, ny, 1.0f, lacunarity, gain, octaves);
+            p = Clamp(p, -1.0f, 1.0f);
+
+            float np = (p + 1.0f)/2.0f;
+
+            int intensity = (int)(np*255.0f);
+            pixels[y*width + x] = (Color) { intensity, intensity, intensity, 255 };
+        }
+    }
+
+    if (IsTextureReady(map->heightmap_texture)) {
+        UnloadTexture(map->heightmap_texture);
+    }
+
+    if (IsImageReady(map->heightmap)) {
+        UnloadImage(map->heightmap);
+    }
+
+    map->heightmap = (Image) {
+        .data = pixels,
+        .width = width,
+        .height = height,
+        .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8,
+        .mipmaps = 1,
+    };
+    map->heightmap_texture = LoadTextureFromImage(map->heightmap);
+}
+
+void DrawProceduralMap(ProceduralMap *map) {
+    if (IsTextureReady(map->heightmap_texture)) {
+        DrawTexture(map->heightmap_texture, (int)map->position.x, (int)map->position.y, WHITE);
+    }
 }
 
 int main() {
@@ -118,13 +204,19 @@ int main() {
             .lacunarity = LACUNARITY_DEF,
             .lacunarity_edit_mode = false,
     };
+    ProceduralMap *map = NewProceduralMap((Vector2) { 210, 10 });
 
     while (!WindowShouldClose()) {
         BeginDrawing();
         {
             ClearBackground(BLACK);
+            // Draw procedural map
+            DrawProceduralMap(map);
+
+            // Draw GUI
             DrawGUI(&options);
 
+            // Handle input (from drawing/updating GUI):
             // Generate random value
             if (options.clicked_random_seed) {
                 options.seed = (int)GetRandomValue(SEED_MIN, SEED_MAX);
@@ -132,13 +224,13 @@ int main() {
 
             // Generate map
             if (options.generate) {
-                TraceLog(LOG_INFO, "Generating a map ...");
+                GenerateProceduralMap(map, options);
             }
         }
         EndDrawing();
     }
 
-
+    UnloadProceduralMap(map);
     CloseWindow();
     return 0;
 }
