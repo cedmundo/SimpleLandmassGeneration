@@ -248,6 +248,7 @@ void GenerateRegionMap(ProceduralMap *map, ProceduralMapOptions options) {
 }
 
 void GenerateProceduralMap(ProceduralMap *map, ProceduralMapOptions options) {
+    // TODO: Allocate new image/texture only after setting width and height, use UpdateTexture otherwise
     GenerateHeightMap(map, options);
     GenerateRegionMap(map, options);
 }
