@@ -4,3 +4,6 @@
 [submodule "vendor/raygui"]
 	path = vendor/raygui
 	url = git@github.com:raysan5/raygui.git
+[submodule "vendor/stb"]
+	path = vendor/stb
+	url = git@github.com:nothings/stb.git
