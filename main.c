@@ -48,6 +48,7 @@
 
 typedef struct {
     bool auto_generate;
+    int active_view;
 
     int seed;
     bool seed_edit_mode;
@@ -78,7 +79,7 @@ typedef struct {
     bool lacunarity_edit_mode;
 
     bool manually_generate;
-} GeneratorOptions;
+} ProceduralMapOptions;
 
 typedef struct {
     Image noise_map;
@@ -86,14 +87,17 @@ typedef struct {
     Vector2 position;
 } ProceduralMap;
 
-void DrawGUI(GeneratorOptions *options) {
+void DrawGUI(ProceduralMapOptions *options) {
     GuiPanel((Rectangle) { .x = 0, .y = 0, .width=200, .height=720 }, "Options");
-
-    // Seed
-    GuiSetStyle(VALUEBOX, TEXT_ALIGNMENT, TEXT_ALIGN_RIGHT);
-    GuiSetStyle(SPINNER, TEXT_ALIGNMENT, TEXT_ALIGN_RIGHT);
     float layout_y = 5.0f;
 
+    GuiSetStyle(VALUEBOX, TEXT_ALIGNMENT, TEXT_ALIGN_RIGHT);
+    GuiSetStyle(SPINNER, TEXT_ALIGNMENT, TEXT_ALIGN_RIGHT);
+
+    // Preview mode
+    GuiToggleGroup((Rectangle) { .x = 5, .y = (layout_y+=25), .width=50, .height = 20 }, "HMAP;RMAP;MESH", &options->active_view);
+
+    // Seed
     if (GuiValueBox((Rectangle) { .x = 5, .y = (layout_y+=25), .width=155, .height = 20 }, " Seed", &options->seed, SEED_MIN, SEED_MAX, options->seed_edit_mode)) {
         options->seed_edit_mode = !options->seed_edit_mode;
     }
@@ -139,7 +143,7 @@ void DrawGUI(GeneratorOptions *options) {
         options->lacunarity_edit_mode = !options->lacunarity_edit_mode;
     }
 
-    options->manually_generate = GuiButton((Rectangle) { .x = 5, .y = (layout_y+=25), .width=190, .height = 20}, "Generate");
+    options->manually_generate = GuiButton((Rectangle) { .x = 5, .y = (layout_y+=25), .width=190, .height = 20}, "Generate map");
 }
 
 ProceduralMap *NewProceduralMap(Vector2 position) {
@@ -175,7 +179,7 @@ float PerlinNoise2D(float x, float y, float lacunarity, float gain, int octaves,
     return sum;
 }
 
-void GenerateProceduralMap(ProceduralMap *map, GeneratorOptions options) {
+void GenerateHeightMap(ProceduralMap *map, ProceduralMapOptions options) {
     // This is basically a copy-paste from raylib, whoever it handles custom options
     size_t total_size = options.width * options.height;
     Color *pixels = MemAlloc(sizeof(Color) * total_size);
@@ -212,17 +216,28 @@ void GenerateProceduralMap(ProceduralMap *map, GeneratorOptions options) {
     }
 
     map->noise_map = (Image) {
-        .data = pixels,
-        .width = width,
-        .height = height,
-        .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8,
-        .mipmaps = 1,
+            .data = pixels,
+            .width = width,
+            .height = height,
+            .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8,
+            .mipmaps = 1,
     };
     map->noise_tex = LoadTextureFromImage(map->noise_map);
 }
 
-void DrawProceduralMap(ProceduralMap *map) {
-    if (IsTextureReady(map->noise_tex)) {
+void GenerateRegionMap(ProceduralMap *map, ProceduralMapOptions options) {
+    (void) map;
+    (void) options;
+    TraceLog(LOG_INFO, "DUMMY: Generating region map based on heightmap");
+}
+
+void GenerateProceduralMap(ProceduralMap *map, ProceduralMapOptions options) {
+    GenerateHeightMap(map, options);
+    GenerateRegionMap(map, options);
+}
+
+void DrawProceduralMap(ProceduralMap *map, ProceduralMapOptions options) {
+    if (options.active_view == 0 && IsTextureReady(map->noise_tex)) {
         DrawTexture(map->noise_tex, (int)map->position.x, (int)map->position.y, WHITE);
     }
 }
@@ -233,7 +248,8 @@ int main() {
     SetTargetFPS(60);
     GuiLoadStyleJungle();
 
-    GeneratorOptions options = {
+    ProceduralMapOptions options = {
+            .active_view = 0,
             .auto_generate = false,
             .seed = 0,
             .seed_edit_mode = false,
@@ -263,7 +279,7 @@ int main() {
         {
             ClearBackground(BLACK);
             // Draw procedural map
-            DrawProceduralMap(map);
+            DrawProceduralMap(map, options);
 
             // Draw GUI
             options.auto_generate = false;
