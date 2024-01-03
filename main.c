@@ -45,7 +45,7 @@
 #define LACUNARITY_MAX 1000
 #define LACUNARITY_FACTOR 100.0f
 
-#define GENERATE_MAP_SECS 0.1f
+#define GENERATE_MAP_SECS 0.03f
 
 typedef struct {
     bool auto_generate;
@@ -195,7 +195,7 @@ float PerlinNoise2D(float x, float y, float lacunarity, float gain, int octaves,
     return sum;
 }
 
-void GenerateHeightMap(ProceduralMap *map, ProceduralMapOptions options) {
+void UpdateHeightMap(ProceduralMap *map, ProceduralMapOptions options) {
     // This is basically a copy-paste from raylib, whoever it handles custom options
     size_t total_size = options.width * options.height;
     Color *pixels = MemAlloc(sizeof(Color) * total_size);
@@ -223,34 +223,43 @@ void GenerateHeightMap(ProceduralMap *map, ProceduralMapOptions options) {
         }
     }
 
-    if (IsTextureReady(map->noise_tex)) {
-        UnloadTexture(map->noise_tex);
+    int old_height = map->noise_map.height;
+    int old_width = map->noise_map.width;
+    if (height == old_height && width == old_width) {
+        map->noise_map.data = pixels;
+    } else {
+        if (IsImageReady(map->noise_map)) {
+            UnloadImage(map->noise_map);
+        }
+        map->noise_map = (Image) {
+                .data = pixels,
+                .width = width,
+                .height = height,
+                .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8,
+                .mipmaps = 1,
+        };
     }
 
-    if (IsImageReady(map->noise_map)) {
-        UnloadImage(map->noise_map);
-    }
+    if (IsTextureReady(map->noise_tex) && height == old_height && width == old_width) {
+        UpdateTexture(map->noise_tex, pixels);
+    } else {
+        if (IsTextureReady(map->noise_tex)) {
+            UnloadTexture(map->noise_tex);
+        }
 
-    map->noise_map = (Image) {
-            .data = pixels,
-            .width = width,
-            .height = height,
-            .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8,
-            .mipmaps = 1,
-    };
-    map->noise_tex = LoadTextureFromImage(map->noise_map);
+        map->noise_tex = LoadTextureFromImage(map->noise_map);
+    }
 }
 
-void GenerateRegionMap(ProceduralMap *map, ProceduralMapOptions options) {
+void UpdateRegionMap(ProceduralMap *map, ProceduralMapOptions options) {
     (void) map;
     (void) options;
     TraceLog(LOG_INFO, "DUMMY: Generating region map based on heightmap");
 }
 
 void GenerateProceduralMap(ProceduralMap *map, ProceduralMapOptions options) {
-    // TODO: Allocate new image/texture only after setting width and height, use UpdateTexture otherwise
-    GenerateHeightMap(map, options);
-    GenerateRegionMap(map, options);
+    UpdateHeightMap(map, options);
+    UpdateRegionMap(map, options);
 }
 
 void DrawProceduralMap(ProceduralMap *map, ProceduralMapOptions options) {
