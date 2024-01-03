@@ -157,6 +157,8 @@ void DrawGUI(ProceduralMapOptions *options) {
 
     options->manually_generate = GuiButton((Rectangle) {.x = 5, .y = (layout_y += 25), .width=190, .height = 20},
                                            "Generate map");
+    GuiStatusBar((Rectangle) {.x=0, .y=(float) GetScreenHeight() - 20, .width=(float) GetScreenWidth(), .height = 20},
+                 TextFormat("Idle | %d FPS", GetFPS()));
 }
 
 ProceduralMap *NewProceduralMap(Vector2 position) {
