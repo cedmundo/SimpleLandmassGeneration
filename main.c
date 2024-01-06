@@ -47,6 +47,8 @@
 
 #define GENERATE_MAP_SECS 0.03f
 
+#define REGION_COUNT 4
+
 typedef struct {
     bool auto_generate;
     int active_view;
@@ -84,7 +86,9 @@ typedef struct {
 
 typedef struct {
     Image noise_map;
+    Image color_map;
     Texture2D noise_tex;
+    Texture2D color_tex;
     Vector2 position;
 } ProceduralMap;
 
@@ -195,10 +199,11 @@ float PerlinNoise2D(float x, float y, float lacunarity, float gain, int octaves,
     return sum;
 }
 
-void UpdateHeightMap(ProceduralMap *map, ProceduralMapOptions options) {
+void GenerateProceduralMap(ProceduralMap *map, ProceduralMapOptions options) {
     // This is basically a copy-paste from raylib, whoever it handles custom options
     size_t total_size = options.width * options.height;
-    Color *pixels = MemAlloc(sizeof(Color) * total_size);
+    Color *heightmap_pixels = MemAlloc(sizeof(Color) * total_size);
+    Color *colormap_pixels = MemAlloc(sizeof(Color) * total_size);
     int offset_x = options.offset_x;
     int offset_y = options.offset_y;
     int seed = options.seed;
@@ -208,6 +213,11 @@ void UpdateHeightMap(ProceduralMap *map, ProceduralMapOptions options) {
     float lacunarity = (float) options.lacunarity / LACUNARITY_FACTOR;
     float gain = (float) options.gain / GAIN_FACTOR;
     int octaves = options.octaves;
+
+    int region_brakes[REGION_COUNT] = {100, 200, 245, 500};
+    float region_hue[REGION_COUNT] = { 215.0f, 150.0f, 26.0f, 0.0f };
+    float region_saturation[REGION_COUNT] = { 0.6f, 0.6f, 0.3f, 0.0f };
+    float region_max_value[REGION_COUNT] = { 1.0f, 1.0f, 0.6f, 1.0f };
 
     for (int y = 0; y < options.height; y++) {
         for (int x = 0; x < options.width; x++) {
@@ -219,52 +229,75 @@ void UpdateHeightMap(ProceduralMap *map, ProceduralMapOptions options) {
             float np = (p + 1.0f) / 2.0f;
 
             int intensity = (int) (np * 255.0f);
-            pixels[y * width + x] = (Color) {intensity, intensity, intensity, 255};
+            heightmap_pixels[y * width + x] = (Color) {intensity, intensity, intensity, 255};
+            for (int r = 0; r < REGION_COUNT; r ++) {
+                if (intensity < region_brakes[r]) {
+                    float vp = Remap(p, -1.0f, 1.0f, 0.0f, region_max_value[r]);
+                    colormap_pixels[y * width + x] = ColorFromHSV(region_hue[r], region_saturation[r], vp);
+                    break;
+                }
+            }
         }
     }
 
     int old_height = map->noise_map.height;
     int old_width = map->noise_map.width;
     if (height == old_height && width == old_width) {
-        map->noise_map.data = pixels;
+        map->noise_map.data = heightmap_pixels;
+        map->color_map.data = colormap_pixels;
     } else {
         if (IsImageReady(map->noise_map)) {
             UnloadImage(map->noise_map);
         }
+
+        if (IsImageReady(map->color_map)) {
+            UnloadImage(map->color_map);
+        }
+
         map->noise_map = (Image) {
-                .data = pixels,
+                .data = heightmap_pixels,
                 .width = width,
                 .height = height,
                 .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8,
                 .mipmaps = 1,
         };
+
+        map->color_map = (Image) {
+            .data = colormap_pixels,
+            .width = width,
+            .height = height,
+            .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8,
+            .mipmaps = 1,
+        };
     }
 
-    if (IsTextureReady(map->noise_tex) && height == old_height && width == old_width) {
-        UpdateTexture(map->noise_tex, pixels);
+    if (height == old_height && width == old_width) {
+        if (IsTextureReady(map->noise_tex)) {
+            UpdateTexture(map->noise_tex, heightmap_pixels);
+        }
+
+        if (IsTextureReady(map->color_tex)) {
+            UpdateTexture(map->color_tex, colormap_pixels);
+        }
     } else {
         if (IsTextureReady(map->noise_tex)) {
             UnloadTexture(map->noise_tex);
         }
 
+        if (IsTextureReady(map->color_tex)) {
+            UnloadTexture(map->color_tex);
+        }
+
         map->noise_tex = LoadTextureFromImage(map->noise_map);
+        map->color_tex = LoadTextureFromImage(map->color_map);
     }
-}
-
-void UpdateRegionMap(ProceduralMap *map, ProceduralMapOptions options) {
-    (void) map;
-    (void) options;
-    TraceLog(LOG_INFO, "DUMMY: Generating region map based on heightmap");
-}
-
-void GenerateProceduralMap(ProceduralMap *map, ProceduralMapOptions options) {
-    UpdateHeightMap(map, options);
-    UpdateRegionMap(map, options);
 }
 
 void DrawProceduralMap(ProceduralMap *map, ProceduralMapOptions options) {
     if (options.active_view == 0 && IsTextureReady(map->noise_tex)) {
         DrawTexture(map->noise_tex, (int) map->position.x, (int) map->position.y, WHITE);
+    } else if (options.active_view == 1 && IsTextureReady(map->color_tex)) {
+        DrawTexture(map->color_tex, (int) map->position.x, (int) map->position.y, WHITE);
     }
 }
 
