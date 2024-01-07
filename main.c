@@ -47,7 +47,7 @@
 
 #define GENERATE_MAP_SECS 0.03f
 
-#define REGION_COUNT 4
+#define REGION_COUNT 9
 
 typedef struct {
     bool auto_generate;
@@ -214,10 +214,28 @@ void GenerateProceduralMap(ProceduralMap *map, ProceduralMapOptions options) {
     float gain = (float) options.gain / GAIN_FACTOR;
     int octaves = options.octaves;
 
-    int region_brakes[REGION_COUNT] = {100, 200, 245, 500};
-    float region_hue[REGION_COUNT] = { 215.0f, 150.0f, 26.0f, 0.0f };
-    float region_saturation[REGION_COUNT] = { 0.6f, 0.6f, 0.3f, 0.0f };
-    float region_max_value[REGION_COUNT] = { 1.0f, 1.0f, 0.6f, 1.0f };
+    float region_brakes[REGION_COUNT] = {
+            0.1f,
+            0.2f,
+            0.22f,
+            0.25f,
+            0.4f,
+            0.5f,
+            0.7f,
+            0.8f,
+            1.0f,
+    };
+    Color region_color[REGION_COUNT] = {
+            ColorFromHSV(235.0f, 0.70f, 0.10f),
+            ColorFromHSV(235.0f, 0.70f, 0.50f),
+            ColorFromHSV(235.0f, 0.70f, 0.80f),
+            ColorFromHSV(54.0f, 0.23f, 1.00f),
+            ColorFromHSV(88.0f, 0.39f, 0.84f),
+            ColorFromHSV(97.0f, 0.53f, 0.73f),
+            ColorFromHSV(114.0f, 0.78f, 0.42f),
+            ColorFromHSV(16.0f, 0.40f, 0.47f),
+            ColorFromHSV(20.0f, 0.03f, 0.94f),
+    };
 
     for (int y = 0; y < options.height; y++) {
         for (int x = 0; x < options.width; x++) {
@@ -231,9 +249,8 @@ void GenerateProceduralMap(ProceduralMap *map, ProceduralMapOptions options) {
             int intensity = (int) (np * 255.0f);
             heightmap_pixels[y * width + x] = (Color) {intensity, intensity, intensity, 255};
             for (int r = 0; r < REGION_COUNT; r ++) {
-                if (intensity < region_brakes[r]) {
-                    float vp = Remap(p, -1.0f, 1.0f, 0.0f, region_max_value[r]);
-                    colormap_pixels[y * width + x] = ColorFromHSV(region_hue[r], region_saturation[r], vp);
+                if (p < region_brakes[r] || FloatEquals(p, region_brakes[r])) {
+                    colormap_pixels[y * width + x] = region_color[r];
                     break;
                 }
             }
