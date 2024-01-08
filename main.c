@@ -23,12 +23,12 @@
 #define OFFSET_Y_DEF 0
 #define OFFSET_Y_MAX 10000
 
-#define WIDTH_MIN 100
-#define WIDTH_DEF 500
+#define WIDTH_MIN 10
+#define WIDTH_DEF 10
 #define WIDTH_MAX 10000
 
-#define HEIGHT_MIN 100
-#define HEIGHT_DEF 500
+#define HEIGHT_MIN 10
+#define HEIGHT_DEF 10
 #define HEIGHT_MAX 10000
 
 #define OCTAVES_MIN 1
@@ -44,6 +44,16 @@
 #define LACUNARITY_DEF 200
 #define LACUNARITY_MAX 1000
 #define LACUNARITY_FACTOR 100.0f
+
+#define MESH_SCALE_MIN 1
+#define MESH_SCALE_DEF 100
+#define MESH_SCALE_MAX 1000
+#define MESH_SCALE_FACTOR 10.0f
+
+#define MESH_HEIGHT_MIN 0
+#define MESH_HEIGHT_DEF 10
+#define MESH_HEIGHT_MAX 1000
+#define MESH_HEIGHT_FACTOR 10.0f
 
 #define GENERATE_MAP_SECS 0.03f
 
@@ -81,15 +91,23 @@ typedef struct {
     int lacunarity;
     bool lacunarity_edit_mode;
 
-    bool manually_generate;
+    int mesh_scale;
+    bool mesh_scale_edit_mode;
+
+    int mesh_height;
+    bool mesh_height_edit_mode;
+
+    bool generate_map;
 } ProceduralMapOptions;
 
 typedef struct {
-    Image noise_map;
-    Image color_map;
+    float *noise_map;
+    int height;
+    int width;
     Texture2D noise_tex;
     Texture2D color_tex;
     Vector2 position;
+    Model model;
 } ProceduralMap;
 
 void DrawGUI(ProceduralMapOptions *options) {
@@ -159,8 +177,20 @@ void DrawGUI(ProceduralMapOptions *options) {
         options->lacunarity_edit_mode = !options->lacunarity_edit_mode;
     }
 
-    options->manually_generate = GuiButton((Rectangle) {.x = 5, .y = (layout_y += 25), .width=190, .height = 20},
-                                           "Generate map");
+    GuiLine((Rectangle) {.x = 5, .y = (layout_y += 25), .width=190, .height = 20}, "Mesh options");
+    if (GuiSpinner((Rectangle) {.x = 5, .y = (layout_y += 25), .width=172, .height = 20}, " MS", &options->mesh_scale,
+                   MESH_SCALE_MIN, MESH_SCALE_MAX, options->mesh_scale_edit_mode)) {
+        options->mesh_scale_edit_mode = !options->mesh_scale_edit_mode;
+    }
+
+    if (GuiSpinner((Rectangle) {.x = 5, .y = (layout_y += 25), .width=172, .height = 20}, " MH", &options->mesh_height,
+                   MESH_HEIGHT_MIN, MESH_HEIGHT_MAX, options->mesh_height_edit_mode)) {
+        options->mesh_height_edit_mode = !options->mesh_height_edit_mode;
+    }
+
+    options->generate_map = GuiButton((Rectangle) {.x = 5, .y = (layout_y += 25), .width=190, .height = 20},
+                                      "Generate map");
+
     GuiStatusBar((Rectangle) {.x=0, .y=(float) GetScreenHeight() - 20, .width=(float) GetScreenWidth(), .height = 20},
                  TextFormat("Idle | %d FPS", GetFPS()));
 }
@@ -172,12 +202,16 @@ ProceduralMap *NewProceduralMap(Vector2 position) {
 }
 
 void UnloadProceduralMap(ProceduralMap *map) {
+    if (map->noise_map != NULL) {
+        MemFree(map->noise_map);
+    }
+
     if (IsTextureReady(map->noise_tex)) {
         UnloadTexture(map->noise_tex);
     }
 
-    if (IsImageReady(map->noise_map)) {
-        UnloadImage(map->noise_map);
+    if (IsTextureReady(map->color_tex)) {
+        UnloadTexture(map->color_tex);
     }
 
     MemFree(map);
@@ -199,11 +233,9 @@ float PerlinNoise2D(float x, float y, float lacunarity, float gain, int octaves,
     return sum;
 }
 
-void GenerateProceduralMap(ProceduralMap *map, ProceduralMapOptions options) {
-    // This is basically a copy-paste from raylib, whoever it handles custom options
+void GenerateNoiseMap(ProceduralMap *map, ProceduralMapOptions options) {
     size_t total_size = options.width * options.height;
-    Color *heightmap_pixels = MemAlloc(sizeof(Color) * total_size);
-    Color *colormap_pixels = MemAlloc(sizeof(Color) * total_size);
+    float *noise_values = MemAlloc(sizeof(Color) * total_size);
     int offset_x = options.offset_x;
     int offset_y = options.offset_y;
     int seed = options.seed;
@@ -213,6 +245,60 @@ void GenerateProceduralMap(ProceduralMap *map, ProceduralMapOptions options) {
     float lacunarity = (float) options.lacunarity / LACUNARITY_FACTOR;
     float gain = (float) options.gain / GAIN_FACTOR;
     int octaves = options.octaves;
+
+    for (int y = 0; y < height; y++) {
+        for (int x = 0; x < width; x++) {
+            float nx = (float) (x + offset_x) * (scale / (float) width);
+            float ny = (float) (y + offset_y) * (scale / (float) height);
+            float p = PerlinNoise2D(nx, ny, lacunarity, gain, octaves, seed);
+            noise_values[y * width + x] = Clamp(p, -1.0f, 1.0f);
+        }
+    }
+
+    map->noise_map = noise_values;
+    map->height = height;
+    map->width = width;
+}
+
+void GenerateHeightTexture(ProceduralMap *map) {
+    int width = map->width;
+    int height = map->height;
+    int total_size = width * height;
+    Color *heightmap_pixels = MemAlloc(sizeof(Color) * total_size);
+
+    for (int y = 0; y < height; y++) {
+        for (int x = 0; x < width; x++) {
+            float p = map->noise_map[y * width + x];
+            float np = (p + 1.0f) / 2.0f;
+            int intensity = (int) (np * 255.0f);
+            heightmap_pixels[y * width + x] = (Color) {intensity, intensity, intensity, 255};
+        }
+    }
+
+    Image image = {0};
+    image.height = height;
+    image.width = width;
+    image.data = heightmap_pixels;
+    image.format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8;
+    image.mipmaps = 1;
+
+    if (IsTextureReady(map->noise_tex) && map->noise_tex.width == width && map->noise_tex.height == height) {
+        UpdateTexture(map->noise_tex, image.data);
+    } else {
+        if (IsTextureReady(map->noise_tex)) {
+            UnloadTexture(map->noise_tex);
+        }
+        map->noise_tex = LoadTextureFromImage(image);
+    }
+
+    UnloadImage(image);
+}
+
+void GenerateColorTexture(ProceduralMap *map) {
+    int width = map->width;
+    int height = map->height;
+    int total_size = width * height;
+    Color *colormap_pixels = MemAlloc(sizeof(Color) * total_size);
 
     float region_brakes[REGION_COUNT] = {
             0.1f,
@@ -237,18 +323,10 @@ void GenerateProceduralMap(ProceduralMap *map, ProceduralMapOptions options) {
             ColorFromHSV(20.0f, 0.03f, 0.94f),
     };
 
-    for (int y = 0; y < options.height; y++) {
-        for (int x = 0; x < options.width; x++) {
-            float nx = (float) (x + offset_x) * (scale / (float) width);
-            float ny = (float) (y + offset_y) * (scale / (float) height);
-            float p = PerlinNoise2D(nx, ny, lacunarity, gain, octaves, seed);
-            p = Clamp(p, -1.0f, 1.0f);
-
-            float np = (p + 1.0f) / 2.0f;
-
-            int intensity = (int) (np * 255.0f);
-            heightmap_pixels[y * width + x] = (Color) {intensity, intensity, intensity, 255};
-            for (int r = 0; r < REGION_COUNT; r ++) {
+    for (int y = 0; y < height; y++) {
+        for (int x = 0; x < width; x++) {
+            float p = map->noise_map[y * width + x];
+            for (int r = 0; r < REGION_COUNT; r++) {
                 if (p < region_brakes[r] || FloatEquals(p, region_brakes[r])) {
                     colormap_pixels[y * width + x] = region_color[r];
                     break;
@@ -257,64 +335,129 @@ void GenerateProceduralMap(ProceduralMap *map, ProceduralMapOptions options) {
         }
     }
 
-    int old_height = map->noise_map.height;
-    int old_width = map->noise_map.width;
-    if (height == old_height && width == old_width) {
-        map->noise_map.data = heightmap_pixels;
-        map->color_map.data = colormap_pixels;
+    Image image = {0};
+    image.height = height;
+    image.width = width;
+    image.data = colormap_pixels;
+    image.format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8;
+    image.mipmaps = 1;
+
+    if (IsTextureReady(map->color_tex) && map->color_tex.width == width && map->color_tex.height == height) {
+        UpdateTexture(map->color_tex, image.data);
     } else {
-        if (IsImageReady(map->noise_map)) {
-            UnloadImage(map->noise_map);
-        }
-
-        if (IsImageReady(map->color_map)) {
-            UnloadImage(map->color_map);
-        }
-
-        map->noise_map = (Image) {
-                .data = heightmap_pixels,
-                .width = width,
-                .height = height,
-                .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8,
-                .mipmaps = 1,
-        };
-
-        map->color_map = (Image) {
-            .data = colormap_pixels,
-            .width = width,
-            .height = height,
-            .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8,
-            .mipmaps = 1,
-        };
-    }
-
-    if (height == old_height && width == old_width) {
-        if (IsTextureReady(map->noise_tex)) {
-            UpdateTexture(map->noise_tex, heightmap_pixels);
-        }
-
-        if (IsTextureReady(map->color_tex)) {
-            UpdateTexture(map->color_tex, colormap_pixels);
-        }
-    } else {
-        if (IsTextureReady(map->noise_tex)) {
-            UnloadTexture(map->noise_tex);
-        }
-
         if (IsTextureReady(map->color_tex)) {
             UnloadTexture(map->color_tex);
         }
+        map->color_tex = LoadTextureFromImage(image);
+    }
 
-        map->noise_tex = LoadTextureFromImage(map->noise_map);
-        map->color_tex = LoadTextureFromImage(map->color_map);
+    UnloadImage(image);
+}
+
+void GenerateTerrainMesh(ProceduralMap *map, ProceduralMapOptions options) {
+    int res_z = map->height;
+    int res_x = map->width;
+    float scale = (float) options.mesh_scale / MESH_SCALE_FACTOR;
+    float overall_height = (float) options.mesh_height / MESH_HEIGHT_FACTOR;
+    int vertex_count = res_x * res_z;
+
+    Vector3 *vertices = MemAlloc(sizeof(Vector3) * vertex_count);
+    for (int z = 0; z < res_z; z++) {
+        float pos_z = ((float) z / (float) (res_z - 1) - 0.5f) * scale;
+        for (int x = 0; x < res_x; x++) {
+            float pos_x = ((float) x / (float) (res_x - 1) - 0.5f) * scale;
+            float p = map->noise_map[x + z * res_x];
+            vertices[x + z * res_x] = (Vector3) {pos_x, p * overall_height, pos_z};
+        }
+    }
+
+    Vector3 *normals = MemAlloc(sizeof(Vector3) * vertex_count);
+    for (int n = 0; n < vertex_count; n++) {
+        normals[n] = (Vector3) {0.0f, 1.0f, 0.0f};
+    }
+
+    Vector2 *uvs = MemAlloc(sizeof(Vector2) * vertex_count);
+    for (int v = 0; v < res_z; v++) {
+        for (int u = 0; u < res_x; u++) {
+            uvs[u + v * res_x] = (Vector2) {(float) u / (float) (res_x - 1), (float) v / (float) (res_z - 1)};
+        }
+    }
+
+    int faces = (res_x - 1) * (res_z - 1);
+    int *triangles = MemAlloc(sizeof(int) * faces * 6);
+    int t = 0;
+    for (int face = 0; face < faces; face++) {
+        int i = face + face / (res_x - 1);
+        triangles[t++] = i + res_x;
+        triangles[t++] = i + 1;
+        triangles[t++] = i;
+
+        triangles[t++] = i + res_x;
+        triangles[t++] = i + res_x + 1;
+        triangles[t++] = i + 1;
+    }
+
+    Mesh mesh = {0};
+    mesh.vertexCount = vertex_count;
+    mesh.triangleCount = faces * 2;
+    mesh.vertices = MemAlloc(sizeof(float) * 3 * mesh.vertexCount);
+    mesh.normals = MemAlloc(sizeof(float) * 3 * mesh.vertexCount);
+    mesh.texcoords = MemAlloc(sizeof(float) * 2 * mesh.vertexCount);
+    mesh.indices = MemAlloc(sizeof(unsigned short) * 3 * mesh.triangleCount);
+
+    for (int i = 0; i < vertex_count; i++) {
+        mesh.vertices[3 * i + 0] = vertices[i].x;
+        mesh.vertices[3 * i + 1] = vertices[i].y;
+        mesh.vertices[3 * i + 2] = vertices[i].z;
+    }
+
+    for (int i = 0; i < vertex_count; i++) {
+        mesh.normals[3 * i + 0] = normals[i].x;
+        mesh.normals[3 * i + 1] = normals[i].y;
+        mesh.normals[3 * i + 2] = normals[i].z;
+    }
+
+    for (int i = 0; i < vertex_count; i++) {
+        mesh.texcoords[2 * i + 0] = uvs[i].x;
+        mesh.texcoords[2 * i + 1] = uvs[i].y;
+    }
+
+    for (int i = 0; i < mesh.triangleCount * 3; i++) {
+        mesh.indices[i] = triangles[i];
+    }
+
+    UploadMesh(&mesh, false);
+    map->model = LoadModelFromMesh(mesh);
+    // map->model = LoadModelFromMesh(GenMeshPlane(100, 100, 10, 10));
+
+    MemFree(vertices);
+    MemFree(normals);
+    MemFree(uvs);
+    MemFree(triangles);
+}
+
+void GenerateProceduralMap(ProceduralMap *map, ProceduralMapOptions options) {
+    GenerateNoiseMap(map, options);
+    GenerateHeightTexture(map);
+    GenerateColorTexture(map);
+    if (!options.auto_generate) {
+        GenerateTerrainMesh(map, options);
     }
 }
 
-void DrawProceduralMap(ProceduralMap *map, ProceduralMapOptions options) {
+void DrawProceduralMap(ProceduralMap *map, ProceduralMapOptions options, Camera3D camera) {
     if (options.active_view == 0 && IsTextureReady(map->noise_tex)) {
         DrawTexture(map->noise_tex, (int) map->position.x, (int) map->position.y, WHITE);
     } else if (options.active_view == 1 && IsTextureReady(map->color_tex)) {
         DrawTexture(map->color_tex, (int) map->position.x, (int) map->position.y, WHITE);
+    } else if (options.active_view == 2) {
+        BeginMode3D(camera);
+        if (IsModelReady(map->model)) {
+            DrawModelWires(map->model, Vector3Zero(), 0.1f, WHITE);
+            // DrawModel(map->model, Vector3Zero(), 0.1f, WHITE);
+        }
+        DrawGrid(10, 1.0f);
+        EndMode3D();
     }
 }
 
@@ -323,6 +466,14 @@ int main() {
     SetWindowMonitor(0);
     SetTargetFPS(60);
     GuiLoadStyleJungle();
+    SetExitKey(KEY_NULL);
+
+    Camera3D camera = {0};
+    camera.position = (Vector3) {10.0f, 10.0f, 10.0f}; // Camera position
+    camera.target = (Vector3) {0.0f, 0.0f, 0.0f};      // Camera looking at point
+    camera.up = (Vector3) {0.0f, 1.0f, 0.0f};          // Camera up vector (rotation towards target)
+    camera.fovy = 45.0f;                                // Camera field-of-view Y
+    camera.projection = CAMERA_PERSPECTIVE;             // Camera projection type
 
     ProceduralMapOptions options = {
             .active_view = 0,
@@ -346,32 +497,54 @@ int main() {
             .gain_edit_mode = false,
             .lacunarity = LACUNARITY_DEF,
             .lacunarity_edit_mode = false,
+            .mesh_scale = MESH_SCALE_DEF,
+            .mesh_scale_edit_mode = false,
+            .mesh_height = MESH_HEIGHT_DEF,
+            .mesh_height_edit_mode = false,
     };
     ProceduralMap *map = NewProceduralMap((Vector2) {210, 10});
 
     float generate_map_timer = 0.0f;
+    bool captured = false;
     while (!WindowShouldClose()) {
         BeginDrawing();
         {
             ClearBackground(BLACK);
             // Draw procedural map
-            DrawProceduralMap(map, options);
+            DrawProceduralMap(map, options, camera);
 
             // Draw GUI
             options.auto_generate = false;
             DrawGUI(&options);
-
             Rectangle drawing_area = {.x = 200, .y = 0, .width = (float) GetScreenWidth() -
                                                                  200, .height = (float) GetScreenHeight()};
-            if (IsMouseButtonDown(MOUSE_MIDDLE_BUTTON) && CheckCollisionPointRec(GetMousePosition(), drawing_area)) {
-                options.offset_x -= (int) GetMouseDelta().x;
-                options.offset_y -= (int) GetMouseDelta().y;
-                options.auto_generate = true;
-            }
+            if (options.active_view == 2) {
+                if (captured) {
+                    UpdateCamera(&camera, CAMERA_FREE);
+                }
+                if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) &&
+                    CheckCollisionPointRec(GetMousePosition(), drawing_area)) {
+                    captured = true;
+                    DisableCursor();
+                }
 
-            if (GetMouseWheelMove() != 0.0f && CheckCollisionPointRec(GetMousePosition(), drawing_area)) {
-                options.scale -= (int) (GetMouseWheelMove() * 5);
-                options.auto_generate = true;
+                if (IsKeyPressed(KEY_ESCAPE)) {
+                    captured = false;
+                    EnableCursor();
+                }
+            } else {
+                if (IsMouseButtonDown(MOUSE_MIDDLE_BUTTON) &&
+                    CheckCollisionPointRec(GetMousePosition(), drawing_area)) {
+                    options.offset_x -= (int) GetMouseDelta().x;
+                    options.offset_y -= (int) GetMouseDelta().y;
+                    options.auto_generate = true;
+                }
+
+                if (GetMouseWheelMove() != 0.0f && CheckCollisionPointRec(GetMousePosition(), drawing_area)) {
+                    options.scale -= (int) (GetMouseWheelMove() * 5);
+                    options.auto_generate = true;
+                }
+
             }
 
             // Handle input (from drawing/updating GUI):
@@ -383,7 +556,7 @@ int main() {
 
             // Generate map with button
             generate_map_timer += GetFrameTime();
-            if (options.manually_generate || options.auto_generate && generate_map_timer >= GENERATE_MAP_SECS) {
+            if (options.generate_map || options.auto_generate && generate_map_timer >= GENERATE_MAP_SECS) {
                 generate_map_timer = 0.0f;
                 GenerateProceduralMap(map, options);
             }
