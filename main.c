@@ -46,13 +46,13 @@
 #define LACUNARITY_FACTOR 100.0f
 
 #define MESH_SCALE_MIN 1
-#define MESH_SCALE_DEF 1000
-#define MESH_SCALE_MAX 100000
+#define MESH_SCALE_DEF 100
+#define MESH_SCALE_MAX 10000
 #define MESH_SCALE_FACTOR 10.0f
 
 #define MESH_HEIGHT_MIN 0
-#define MESH_HEIGHT_DEF 100
-#define MESH_HEIGHT_MAX 100000
+#define MESH_HEIGHT_DEF 10
+#define MESH_HEIGHT_MAX 10000
 #define MESH_HEIGHT_FACTOR 10.0f
 
 #define GENERATE_MAP_SECS 0.03f
@@ -110,6 +110,13 @@ typedef struct {
     Model model;
 } ProceduralMap;
 
+enum ViewMode {
+    VIEW_MODE_HEIGHT_MAP,
+    VIEW_MODE_COLOR_MAP,
+    VIEW_MODE_MESH_WIRED,
+    VIEW_MODE_MESH_UNLIT,
+};
+
 void DrawGUI(ProceduralMapOptions *options) {
     GuiPanel((Rectangle) {.x = 0, .y = 0, .width=200, .height=720}, "Options");
     float layout_y = 5.0f;
@@ -118,7 +125,7 @@ void DrawGUI(ProceduralMapOptions *options) {
     GuiSetStyle(SPINNER, TEXT_ALIGNMENT, TEXT_ALIGN_RIGHT);
 
     // Preview mode
-    GuiToggleGroup((Rectangle) {.x = 5, .y = (layout_y += 25), .width=50, .height = 20}, "HMAP;RMAP;MESH",
+    GuiToggleGroup((Rectangle) {.x = 5, .y = (layout_y += 25), .width=46, .height = 20}, "HMAP;CMAP;WIR;MESH",
                    &options->active_view);
 
     // Seed
@@ -432,6 +439,7 @@ void GenerateTerrainMesh(ProceduralMap *map, ProceduralMapOptions options) {
 
     UploadMesh(&mesh, false);
     map->model = LoadModelFromMesh(mesh);
+    SetMaterialTexture(map->model.materials, MATERIAL_MAP_DIFFUSE, map->color_tex);
 
     MemFree(vertices);
     MemFree(normals);
@@ -449,15 +457,21 @@ void GenerateProceduralMap(ProceduralMap *map, ProceduralMapOptions options) {
 }
 
 void DrawProceduralMap(ProceduralMap *map, ProceduralMapOptions options, Camera3D camera) {
-    if (options.active_view == 0 && IsTextureReady(map->noise_tex)) {
+    if (options.active_view == VIEW_MODE_HEIGHT_MAP && IsTextureReady(map->noise_tex)) {
         DrawTexture(map->noise_tex, (int) map->position.x, (int) map->position.y, WHITE);
-    } else if (options.active_view == 1 && IsTextureReady(map->color_tex)) {
+    } else if (options.active_view == VIEW_MODE_COLOR_MAP && IsTextureReady(map->color_tex)) {
         DrawTexture(map->color_tex, (int) map->position.x, (int) map->position.y, WHITE);
-    } else if (options.active_view == 2) {
+    } else if (options.active_view == VIEW_MODE_MESH_WIRED) {
         BeginMode3D(camera);
         if (IsModelReady(map->model)) {
-            DrawModelWires(map->model, Vector3Zero(), 0.1f, WHITE);
-            // DrawModel(map->model, Vector3Zero(), 0.1f, WHITE);
+            DrawModelWires(map->model, Vector3Zero(), 1.0f, WHITE);
+        }
+        DrawGrid(10, 1.0f);
+        EndMode3D();
+    } else if (options.active_view == VIEW_MODE_MESH_UNLIT) {
+        BeginMode3D(camera);
+        if (IsModelReady(map->model)) {
+            DrawModel(map->model, Vector3Zero(), 1.0f, WHITE);
         }
         DrawGrid(10, 1.0f);
         EndMode3D();
@@ -521,7 +535,7 @@ int main() {
             DrawGUI(&options);
             Rectangle drawing_area = {.x = 200, .y = 0, .width = (float) GetScreenWidth() -
                                                                  200, .height = (float) GetScreenHeight()};
-            if (options.active_view == 2) {
+            if (options.active_view == VIEW_MODE_MESH_WIRED || options.active_view == VIEW_MODE_MESH_UNLIT) {
                 if (captured) {
                     UpdateCamera(&camera, CAMERA_FREE);
                 }
