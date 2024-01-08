@@ -426,9 +426,12 @@ void GenerateTerrainMesh(ProceduralMap *map, ProceduralMapOptions options) {
         mesh.indices[i] = triangles[i];
     }
 
+    if (IsModelReady(map->model)) {
+        UnloadModel(map->model);
+    }
+
     UploadMesh(&mesh, false);
     map->model = LoadModelFromMesh(mesh);
-    // map->model = LoadModelFromMesh(GenMeshPlane(100, 100, 10, 10));
 
     MemFree(vertices);
     MemFree(normals);
