@@ -14,3 +14,16 @@ cmake -DCMAKE_BUILD_TYPE=debug -B cmake-build-debug
 cmake --build cmake-build-debug 
 ```
 Done.
+
+## TODOs
+
+* Level of Detail
+* Endless terrain
+* Threading?
+* LOD Switching
+* Seams/Falloff
+* Normals
+* Collisions
+* Data Storage
+* Colour/Texture Shader
+* Optimization
