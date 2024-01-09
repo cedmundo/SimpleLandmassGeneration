@@ -1,6 +1,6 @@
 # SimpleLandmassGeneration
 
-A very simple and naive implementation of vector field pathfinding.
+A very simple and naive implementation of procedural terrain generation, heavily based on Sebastian League's tutorial.
 
 ## Building
 First install all dependencies needed to build raylib from source, then fetch code with submodules:
@@ -14,7 +14,3 @@ cmake -DCMAKE_BUILD_TYPE=debug -B cmake-build-debug
 cmake --build cmake-build-debug 
 ```
 Done.
-
-## TODO List
-
-* Integration field appears to not be properly calculated on wall borders.
